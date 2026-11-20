@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Santa Radio</title>
+<style>
+  :root {
+    --bg: #0f1a14;
+    --panel: #1b2b22;
+    --lcd: #0b2a1a;
+    --lcd-text: #7dffb0;
+    --red: #d62828;
+    --red-dark: #8f1a1a;
+    --gold: #f2c14e;
+    --text: #e8efe9;
+    --muted: #8fa396;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  body { min-height: 100vh; display: flex; justify-content: center; padding: 16px; }
+  main { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 14px; }
+  header { text-align: center; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: 3px; color: var(--gold); }
+  .status { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px;
+    font-size: 12px; color: var(--muted); letter-spacing: 1px; }
+  .led { width: 10px; height: 10px; border-radius: 50%; background: #444; }
+  .led.on  { background: #ff4d4d; box-shadow: 0 0 10px #ff4d4d; }
+  .led.rx  { background: #5dff9a; box-shadow: 0 0 10px #5dff9a; }
+  .lcd { background: var(--lcd); border: 2px solid #2d4a3a; border-radius: 12px;
+    padding: 14px; min-height: 140px; color: var(--lcd-text); }
+  .lcd .who { font-size: 12px; letter-spacing: 2px; opacity: .75; margin-bottom: 8px; }
+  .lcd .line { font-size: 16px; line-height: 1.45; }
+  .lcd .heard { margin-top: 10px; font-size: 13px; opacity: .7; font-style: italic; }
+  .ptt-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #ptt { width: 168px; height: 168px; border-radius: 50%; border: 6px solid #3a0d0d;
+    background: radial-gradient(circle at 35% 30%, #ff5a5a, var(--red) 55%, var(--red-dark));
+    color: #fff; font: 700 22px ui-monospace, Menlo, monospace; letter-spacing: 2px;
+    cursor: pointer; box-shadow: 0 8px 0 #4d1010, 0 12px 24px rgba(0,0,0,.5);
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  #ptt { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+  #ptt:active { transform: translateY(4px); box-shadow: 0 4px 0 #4d1010; }
+  #micGate { display: none; position: fixed; inset: 0; background: rgba(8,14,11,.94); z-index: 10;
+    flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+  #micGate button { padding: 14px 22px; border-radius: 10px; border: 0; background: var(--gold); color: #222; font: 700 16px ui-monospace, Menlo, monospace; cursor: pointer; }
+  #ptt.live { animation: pulse 1.1s infinite; }
+  #ptt:disabled { filter: grayscale(.8) brightness(.6); cursor: not-allowed; animation: none; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 8px 0 #4d1010, 0 0 0 0 rgba(255,77,77,.7); }
+                     50%     { box-shadow: 0 8px 0 #4d1010, 0 0 0 22px rgba(255,77,77,0); } }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; min-height: 16px; }
+  #log { background: var(--panel); border-radius: 12px; padding: 10px 12px; font-size: 13px;
+    max-height: 200px; overflow-y: auto; line-height: 1.5; }
+  #log div { margin-bottom: 6px; }
+  #log .santa { color: var(--gold); }
+  #log .base  { color: #9fd8ff; }
+  #log .ruphus{ color: #ffb3b3; }
+  #log .sys   { color: var(--muted); font-style: italic; }
+  details { font-size: 12px; color: var(--muted); }
+  details input { width: calc(100% - 70px); padding: 8px; border-radius: 8px; border: 1px solid #355; background: #0c1510; color: var(--text); }
+  details button, #restart { padding: 8px 12px; border-radius: 8px; border: 0; background: var(--gold); color: #222; font-weight: 700; cursor: pointer; }
+  #restart { display: none; margin: 0 auto; }
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>NORTH POLE RADIO</h1>
+    <div class="status"><span class="led" id="led"></span><span id="statusText">STANDBY</span></div>
+  </header>
+
+  <section class="lcd" aria-live="polite">
+    <div class="who" id="who">CHANNEL 1 · HOME BASE</div>
+    <div class="line" id="line">Press PTT and say "Santa to home base, over."</div>
+    <div class="heard" id="heard"></div>
+  </section>
+
+  <section class="ptt-wrap">
+    <button id="ptt" aria-label="Push to talk">PTT</button>
+    <div class="hint" id="hint">Hold the button to talk. Release when you're done.</div>
+    <button id="restart">START OVER</button>
+  </section>
+
+  <section id="log" aria-label="Radio log"></section>
+
+  <details id="typed">
+    <summary>No mic? Type what Santa says</summary>
+    <div class="row">
+      <input id="typedInput" placeholder='e.g. "Santa to home base, over"' autocomplete="off">
+      <button id="typedSend">Send</button>
+    </div>
+  </details>
+</main>
+
+<div id="micGate">
+  <div style="font-size:42px">🎙️</div>
+  <div id="micGateMsg">Santa Radio needs your microphone to hear you.</div>
+  <button id="micGateBtn">ALLOW MICROPHONE</button>
+</div>
+
+<script>
+/* ============================================================
+   1. THE SCRIPT  (edit text here; add `audio:"audio/file.mp3"`
+      to any line to use a real recording instead of the
+      placeholder text-to-speech voice)
+   ============================================================ */
+const L = (who, text, audio = "") => ({ who, text, audio });
+
+const LINES = {
+  greeting: [ L("HOME BASE", "This is home base, how can I help you Santa?") ],
+
+  jingleberry: [ L("HOME BASE",
+    "Ruphus? Oh boy. Hold on a minute, Santa. Let me see if I can find him. This is Jingleberry, by the way. I'm covering the phones today because somebody put tinsel in the copy machine again. Stand by, over.") ],
+
+  stillThere: [ L("HOME BASE",
+    "Santa, are you still there? I've located Ruphus. Well, I've located his desk. He's not actually at it. I think he's in the records room. Hold on. RUPHUS! PHONE CALL! IT'S THE BIG GUY! ... Sorry, Santa. He's a little hard of hearing. Too many years working next to the toy testing department. Stand by, over.") ],
+
+  list: [ L("RUPHUS",
+    "Okay, I've got the list. Let's see here... Nope, that's the reindeer maintenance schedule. Here's the naughty list. Oh, wait. That's last year's list. Hang on, Santa. I've got a lot of names to get through. Somebody's been very busy this year! Over.") ],
+
+  search: [ L("RUPHUS",
+    "Just a minute... I'm checking... scrolling... scrolling... Oh, these elves and their long names! There we go. Found the right name!") ],
+
+  verdict: [
+    L("RUPHUS", "Well, Santa, I've checked twice, and I've even had Gerald check it once. He usually gets things wrong, but this time we're in agreement!"),
+    L("RUPHUS", "Kids been great, Santa! Gotta run, very busy up here, over!")
+  ],
+
+  // Placeholder used only if the app doesn't understand Santa (not part of your script)
+  sayAgain: [ L("HOME BASE", "Say again, Santa? You're breaking up. Over.") ]
+};
+
+/* ============================================================
+   2. THE CONVERSATION  (keyword-triggered, in order)
+      re: what Santa must say to trigger the reply (null = anything)
+   ============================================================ */
+const STAGES = [
+  { name: "Call home base",
+    re: /\b(home ?base|santa|north pole|base)\b/i,
+    reply: () => LINES.greeting,
+    prompt: 'Say: "Santa to home base, over."' },
+
+  { name: "Ask for Ruphus",
+    re: /\b(ru+[fph]+[ie]?u?s|roo+f+[ou]*s|rufus|ruphus|roofus|reuben)\b/i,
+    reply: () => LINES.jingleberry,
+    prompt: 'Ask for Ruphus. Say: "I need to speak to Ruphus, over."' },
+
+  { name: "Stand by",
+    re: /\b(copy|roger|standing|stand ?by|waiting|okay|ok|yes|yeah|affirmative|still|here|hear|got it|understood)\b/i,
+    reply: () => LINES.stillThere,
+    prompt: 'Say: "Copy that, standing by, over."' },
+
+  { name: "Talk to Ruphus",
+    re: /\b(ru+[fph]+[ie]?u?s|rufus|roofus|list|naughty|nice|check|name|child|kid|hello|hey|hi|there)\b/i,
+    reply: () => LINES.list,
+    prompt: 'Talk to Ruphus: "Ruphus, I need you to check a name, over."' },
+
+  { name: "Give the child's name",
+    re: null,
+    reply: () => [...LINES.search, ...LINES.verdict],
+    prompt: "Tell Ruphus the child's name, then say over." },
+
+  { name: "Sign off",
+    re: null,
+    reply: () => [],
+    prompt: "Say whatever you want to sign off, then say over.",
+    ends: true }
+];
+
+/* ============================================================
+   3. APP STATE + UI
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const ptt = $("ptt"), led = $("led"), statusText = $("statusText"),
+      whoEl = $("who"), lineEl = $("line"), heardEl = $("heard"),
+      hintEl = $("hint"), logEl = $("log"), restartBtn = $("restart");
+
+let stage = 0, misses = 0, busy = false, keyed = false, ended = false;
+
+function setStatus(text, mode) {
+  statusText.textContent = text;
+  led.className = "led" + (mode ? " " + mode : "");
+}
+function log(cls, who, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = who ? who + ": " + text : text;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+/* ============================================================
+   4. RADIO SOUNDS (squelch beeps)
+   ============================================================ */
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+function beep(freq = 900, dur = 0.08, vol = 0.12) {
+  if (!audioCtx) return Promise.resolve();
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = "square"; o.frequency.value = freq; g.gain.value = vol;
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+  return wait(dur * 1000 + 40);
+}
+async function keyUpBeep()   { await beep(1200, 0.07); }
+async function keyDownBeep() { await beep(700, 0.07); await beep(500, 0.09); }
+
+/* ============================================================
+   5. PLAYING RESPONSES (recorded audio if provided, else TTS)
+   ============================================================ */
+let voices = [];
+function loadVoices() {
+  voices = (speechSynthesis.getVoices() || []).filter(v => /^en/i.test(v.lang));
+}
+if ("speechSynthesis" in window) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+function ttsSpeak(line) {
+  return new Promise(resolve => {
+    if (!("speechSynthesis" in window)) return resolve();
+    const u = new SpeechSynthesisUtterance(line.text);
+    const isRuphus = line.who === "RUPHUS";
+    if (voices.length) u.voice = voices[isRuphus ? Math.min(1, voices.length - 1) : 0];
+    u.pitch = isRuphus ? 0.6 : 1.35;
+    u.rate  = isRuphus ? 0.92 : 1.05;
+    const safety = setTimeout(resolve, Math.max(8000, line.text.length * 110));
+    u.onend = u.onerror = () => { clearTimeout(safety); resolve(); };
+    speechSynthesis.speak(u);
+  });
+}
+function playRecording(line) {
+  return new Promise(resolve => {
+    const a = new Audio(line.audio);
+    a.onended = () => resolve(true);
+    a.onerror = () => resolve(false);   // missing file -> fall back to TTS
+    a.play().catch(() => resolve(false));
+  });
+}
+async function playLine(line) {
+  whoEl.textContent = line.who === "RUPHUS" ? "RUPHUS · RECORDS ROOM" : "HOME BASE";
+  lineEl.textContent = line.text;
+  log(line.who === "RUPHUS" ? "ruphus" : "base", line.who, line.text);
+  if (line.audio) {
+    const ok = await playRecording(line);
+    if (ok) return;
+  }
+  await ttsSpeak(line);
+}
+async function playLines(lines) {
+  setStatus("RECEIVING", "rx");
+  await keyDownBeep();
+  for (const l of lines) { await playLine(l); await wait(350); }
+  await keyUpBeep();
+}
+
+/* ============================================================
+   6. LISTENING (PTT + "over" detection)
+   ============================================================ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const OVER_RE = /\bover\b(\s+and\s+out)?[\s.,!?]*$/i;
+
+let rec = null, base = "", transcript = "", overTimer = null, finishing = false;
+
+function startListening() {
+  ensureAudio();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  keyed = true; finishing = false; base = ""; transcript = "";
+  heardEl.textContent = "";
+  ptt.classList.add("live");
+  setStatus("TRANSMITTING", "on");
+  hintEl.textContent = "Listening... release the button when you're done.";
+  beep(1000, 0.06);
+
+  rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = "en-US";
+
+  rec.onresult = e => {
+    let t = "";
+    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + " ";
+    transcript = (base + t).trim();
+    heardEl.textContent = '"' + transcript + '"';
+  };
+  rec.onerror = e => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      hintEl.textContent = "Microphone blocked. Allow mic access for this page and try again.";
+      cancelListening();
+    }
+  };
+  rec.onend = () => {
+    // Browsers stop recognition after a pause; keep it going while keyed
+    if (keyed && !finishing) {
+      base = transcript + " ";
+      try { rec.start(); } catch (e) {}
+    }
+  };
+  try { rec.start(); } catch (e) {}
+}
+
+function stopRec() {
+  clearTimeout(overTimer);
+  if (rec) { rec.onend = null; rec.onresult = null; try { rec.stop(); } catch (e) {} }
+}
+function cancelListening() {
+  keyed = false; finishing = true; stopRec();
+  ptt.classList.remove("live");
+  setStatus("STANDBY");
+}
+// Called when the PTT button is released: stop the mic, let the last words
+// finish processing, then hand the transcript to the brain.
+function releaseListening() {
+  if (!keyed || finishing) return;
+  finishing = true; keyed = false;
+  ptt.classList.remove("live");
+  setStatus("SENDING");
+  let done = false;
+  const finalize = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(overTimer);
+    if (rec) { rec.onend = null; rec.onresult = null; }
+    // "over" is optional now; strip it so keyword matching stays clean
+    handleTransmission(transcript.replace(OVER_RE, "").trim() || transcript.trim());
+  };
+  if (rec) {
+    rec.onend = finalize;
+    try { rec.stop(); } catch (e) { finalize(); }
+  }
+  overTimer = setTimeout(finalize, 1000);   // safety net
+}
+
+/* ============================================================
+   MICROPHONE PERMISSION (asked as soon as the app opens)
+   ============================================================ */
+async function requestMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return true;   // can't pre-check; the browser will ask on first use
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());   // we only wanted the permission
+    $("micGate").style.display = "none";
+    return true;
+  } catch (e) {
+    $("micGate").style.display = "flex";
+    $("micGateMsg").textContent = (e && e.name === "NotAllowedError")
+      ? "Microphone access was blocked. Allow it in your browser's site settings, then tap the button."
+      : "Santa Radio needs your microphone to hear you.";
+    return false;
+  }
+}
+
+/* ============================================================
+   7. THE BRAIN
+   ============================================================ */
+async function handleTransmission(text) {
+  if (!text) {
+    setStatus("STANDBY");
+    hintEl.textContent = "Didn't catch anything. Tap PTT and try again.";
+    return;
+  }
+  busy = true; ptt.disabled = true;
+  log("santa", "SANTA", text);
+  setStatus("SENDING");
+  await keyUpBeep();
+
+  const s = STAGES[stage];
+  const matched = !s.re || s.re.test(text);
+
+  if (!matched && misses < 2) {
+    misses++;
+    await playLines(LINES.sayAgain);
+  } else {
+    misses = 0;
+    const replyLines = s.reply();
+    if (replyLines.length) await playLines(replyLines);
+    if (s.ends) { endConversation(); return; }
+    stage++;
+  }
+  busy = false; ptt.disabled = false;
+  setStatus("STANDBY");
+  hintEl.textContent = STAGES[stage].prompt;
+}
+
+function endConversation() {
+  ended = true; busy = false;
+  ptt.disabled = true;
+  setStatus("CONVERSATION ENDED");
+  whoEl.textContent = "CHANNEL CLOSED";
+  lineEl.textContent = "Transmission complete.";
+  hintEl.textContent = "";
+  log("sys", "", "— conversation ended —");
+  restartBtn.style.display = "block";
+}
+
+function reset() {
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  cancelListening();
+  stage = 0; misses = 0; busy = false; ended = false;
+  ptt.disabled = false;
+  whoEl.textContent = "CHANNEL 1 · HOME BASE";
+  lineEl.textContent = 'Press PTT and say "Santa to home base, over."';
+  heardEl.textContent = "";
+  hintEl.textContent = "Hold the button to talk. Release when you're done.";
+  logEl.innerHTML = "";
+  restartBtn.style.display = "none";
+  setStatus("STANDBY");
+}
+
+/* ============================================================
+   8. WIRING
+   ============================================================ */
+function pttDown(e) {
+  if (e) e.preventDefault();
+  if (busy || ended || keyed) return;
+  if (!SR) { hintEl.textContent = "Speech recognition isn't supported in this browser. Try Chrome or Safari, or use the typed box below."; $("typed").open = true; return; }
+  startListening();
+}
+function pttUp(e) {
+  if (e) e.preventDefault();
+  releaseListening();
+}
+ptt.addEventListener("pointerdown", e => { try { ptt.setPointerCapture(e.pointerId); } catch (x) {} pttDown(e); });
+ptt.addEventListener("pointerup", pttUp);
+ptt.addEventListener("pointercancel", pttUp);
+ptt.addEventListener("contextmenu", e => e.preventDefault());
+// Spacebar works as PTT on desktop (hold to talk)
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && !e.repeat && e.target.tagName !== "INPUT") pttDown(e);
+});
+document.addEventListener("keyup", e => {
+  if (e.code === "Space" && e.target.tagName !== "INPUT") pttUp(e);
+});
+$("micGateBtn").addEventListener("click", requestMic);
+requestMic();   // ask for the mic as soon as the app opens
+restartBtn.addEventListener("click", reset);
+
+$("typedSend").addEventListener("click", () => {
+  const v = $("typedInput").value.trim();
+  if (!v || busy || ended) return;
+  ensureAudio();
+  $("typedInput").value = "";
+  handleTransmission(v.replace(/\s*\bover\b[.!?\s]*$/i, "").trim() || v);
+});
+
+if (!SR) {
+  hintEl.textContent = "This browser has no speech recognition. Use Chrome or Safari, or type below.";
+  $("typed").open = true;
+}
+</script>
+</body>
+</html>
